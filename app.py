@@ -8,49 +8,55 @@ st.title("🩺 Simulador: Visita Médica")
 # Sidebar para configuración
 with st.sidebar:
     api_key = st.text_input("Pega tu API Key de Google", type="password")
-    st.info("Configura tu clave para empezar.")
+    if st.button("Reiniciar Conversación"):
+        st.session_state.clear()
+        st.rerun()
 
 if api_key:
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-1.5-flash')
-
+    
     # Subida de archivo
     archivo_guia = st.file_uploader("Sube el manual del producto (PDF)", type="pdf")
 
     if archivo_guia:
-        # LEER EL PDF
-        @st.cache_data # Para que no lea el PDF cada vez que hablas
-        def extraer_texto(pdf):
-            reader = PdfReader(pdf)
-            texto = ""
-            for page in reader.pages:
-                texto += page.extract_text()
-            return texto
+        # Extraer texto del PDF de forma segura
+        reader = PdfReader(archivo_guia)
+        texto_pdf = ""
+        for page in reader.pages:
+            texto_pdf += page.extract_text()
+        
+        # Configurar el modelo
+        model = genai.GenerativeModel('gemini-1.5-flash')
 
-        texto_pdf = extraer_texto(archivo_guia)
-
-        # Iniciar Chat
-        if "chat" not in st.session_state:
-            st.session_state.chat = model.start_chat(history=[])
-            # El "Prompt" de sistema con el contenido del PDF
-            instruccion = (
-                f"Eres un médico especialista. He recibido este manual de producto: {texto_pdf}. "
-                "Tu objetivo es actuar como un médico en su consultorio. Sé profesional, algo ocupado "
-                "y evalúa rigurosamente lo que el visitador te diga basado en el manual. "
-                "No menciones que eres una IA ni que leíste un PDF. Saluda brevemente para empezar."
+        # Iniciar historial si no existe
+        if "messages" not in st.session_state:
+            st.session_state.messages = []
+            # Enviamos la instrucción inicial de forma interna
+            contexto = (
+                f"Eres un médico especialista. Conoces este producto: {texto_pdf[:5000]}. "
+                "Responde como un médico real en su consulta. Sé breve y profesional."
             )
-            st.session_state.chat.send_message(instruccion)
+            # El primer mensaje lo genera la IA para saludar
+            res = model.generate_content(contexto + " Salúdame brevemente para empezar la visita.")
+            st.session_state.messages.append({"role": "assistant", "content": res.text})
 
-        # Mostrar conversación
-        for mensaje in st.session_state.chat.history[1:]: # Saltamos la instrucción secreta
-            role = "Médico" if mensaje.role == "model" else "Tú"
-            with st.chat_message(mensaje.role):
-                st.write(f"**{role}:** {mensaje.parts[0].text}")
+        # Mostrar los mensajes
+        for msg in st.session_state.messages:
+            st.chat_message(msg["role"]).write(msg["content"])
 
         # Entrada de usuario
-        prompt = st.chat_input("Escribe o usa el micrófono del cel...")
-        if prompt:
-            st.session_state.chat.send_message(prompt)
+        if prompt := st.chat_input("Escribe tu mensaje aquí..."):
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            st.chat_message("user").write(prompt)
+            
+            # Generar respuesta basada en el historial
+            # Limitamos el texto del PDF para no saturar la memoria
+            historial_input = f"Contexto producto: {texto_pdf[:3000]}\n\n"
+            for m in st.session_state.messages:
+                historial_input += f"{m['role']}: {m['content']}\n"
+            
+            respuesta = model.generate_content(historial_input)
+            st.session_state.messages.append({"role": "assistant", "content": respuesta.text})
             st.rerun()
 else:
     st.warning("Falta la API Key en la barra lateral.")
