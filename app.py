@@ -1,43 +1,56 @@
 import streamlit as st
 import google.generativeai as genai
-import os
+from PyPDF2 import PdfReader
 
-# Configuración visual
-st.set_page_config(page_title="Simulador de Visita Médica", layout="centered")
-st.title("🩺 Mi Simulador de Visita")
+st.set_page_config(page_title="Simulador Médico Pro", layout="centered")
+st.title("🩺 Simulador: Visita Médica")
 
-# 1. Configurar la API Key (La pondremos en una caja de texto o secreta)
-api_key = st.sidebar.text_input("Pega tu API Key de Google aquí", type="password")
+# Sidebar para configuración
+with st.sidebar:
+    api_key = st.text_input("Pega tu API Key de Google", type="password")
+    st.info("Configura tu clave para empezar.")
 
 if api_key:
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel('gemini-1.5-flash')
 
-    # 2. Subir las guías del producto
-    archivo_guia = st.file_uploader("Sube la Guía del Producto (PDF)", type="pdf")
+    # Subida de archivo
+    archivo_guia = st.file_uploader("Sube el manual del producto (PDF)", type="pdf")
 
     if archivo_guia:
-        # Iniciamos el chat si no existe
+        # LEER EL PDF
+        @st.cache_data # Para que no lea el PDF cada vez que hablas
+        def extraer_texto(pdf):
+            reader = PdfReader(pdf)
+            texto = ""
+            for page in reader.pages:
+                texto += page.extract_text()
+            return texto
+
+        texto_pdf = extraer_texto(archivo_guia)
+
+        # Iniciar Chat
         if "chat" not in st.session_state:
             st.session_state.chat = model.start_chat(history=[])
-            # Instrucción de Rol
-            st.session_state.chat.send_message(
-                f"Actúa como un médico. He subido una guía de producto. "
-                f"Tu conocimiento se basa en este archivo. Sé realista, haz preguntas difíciles "
-                f"y evalúa si el visitador conoce bien el producto. Empieza saludando."
+            # El "Prompt" de sistema con el contenido del PDF
+            instruccion = (
+                f"Eres un médico especialista. He recibido este manual de producto: {texto_pdf}. "
+                "Tu objetivo es actuar como un médico en su consultorio. Sé profesional, algo ocupado "
+                "y evalúa rigurosamente lo que el visitador te diga basado en el manual. "
+                "No menciones que eres una IA ni que leíste un PDF. Saluda brevemente para empezar."
             )
+            st.session_state.chat.send_message(instruccion)
 
-        # Mostrar historial de conversación
-        for mensaje in st.session_state.chat.history:
+        # Mostrar conversación
+        for mensaje in st.session_state.chat.history[1:]: # Saltamos la instrucción secreta
             role = "Médico" if mensaje.role == "model" else "Tú"
-            st.write(f"**{role}:** {mensaje.parts[0].text}")
+            with st.chat_message(mensaje.role):
+                st.write(f"**{role}:** {mensaje.parts[0].text}")
 
-        # 3. Entrada de voz/texto
-        # En el celular, al tocar esta caja, se abre el teclado y puedes usar el micrófono.
-        prompt = st.chat_input("Cuéntame sobre el producto...")
-        
+        # Entrada de usuario
+        prompt = st.chat_input("Escribe o usa el micrófono del cel...")
         if prompt:
-            respuesta = st.session_state.chat.send_message(prompt)
-            st.rerun() # Refresca para mostrar la respuesta
+            st.session_state.chat.send_message(prompt)
+            st.rerun()
 else:
-    st.warning("Por favor, ingresa tu API Key en la barra lateral para comenzar.")
+    st.warning("Falta la API Key en la barra lateral.")
