@@ -3,76 +3,55 @@ import google.generativeai as genai
 from PyPDF2 import PdfReader
 from streamlit_mic_recorder import speech_to_text
 
-st.set_page_config(page_title="Simulador de Voz: Jeferson", layout="centered")
+st.set_page_config(page_title="Simulador Voz: Jeferson", layout="centered")
 
-# 1. Conexión Segura
+# Conexión con Secrets
 try:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 except:
-    st.error("⚠️ Configura la GEMINI_API_KEY en los Secrets de Streamlit.")
+    st.error("⚠️ Configura la GEMINI_API_KEY en Secrets.")
     st.stop()
 
-# Inicializar estados
-if "messages" not in st.session_state:
-    st.session_state.messages = []
 if "entrenado" not in st.session_state:
     st.session_state.entrenado = False
 
-st.title("🎙️ Visita Médica: Solo Voz")
+st.title("🎙️ Entrenamiento de Voz")
 
-# 2. ELIMINADOR DE ERROR 404 (Busca el modelo disponible automáticamente)
-if "modelo_nombre" not in st.session_state:
-    try:
-        # Buscamos qué modelos tienes permitidos
-        modelos_disponibles = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        # Preferimos el 1.5-flash porque es el mejor para voz y es rápido
-        st.session_state.modelo_nombre = next((m for m in modelos_disponibles if '1.5-flash' in m), modelos_disponibles[0])
-    except:
-        st.session_state.modelo_nombre = "models/gemini-1.5-flash"
+# Modelo rápido
+model = genai.GenerativeModel('gemini-1.5-flash')
 
-model = genai.GenerativeModel(st.session_state.modelo_nombre)
-
-# 3. Carga del Manual de Filinar G
+# 1. Carga del Manual
 if not st.session_state.entrenado:
-    archivo = st.file_uploader("Sube el PDF para que el Dr. lo analice", type="pdf")
+    archivo = st.file_uploader("Sube el PDF de Filinar G", type="pdf")
     if archivo:
-        with st.spinner("El Doctor está entrando al consultorio..."):
-            reader = PdfReader(archivo)
-            # Guardamos el texto del manual (limitado para no saturar)
-            st.session_state.pdf_text = "".join([p.extract_text() for p in reader.pages])[:8000]
-            
-            # Saludo inicial
-            res = model.generate_content("Eres un Pediatra amable. Saluda a Jeferson Cuadrado de forma muy breve.")
-            st.session_state.entrenado = True
-            
-            # VOZ AUTOMÁTICA (Primera vez)
-            st.audio(f"https://translate.google.com/translate_tts?ie=UTF-8&q={res.text[:200]}&tl=es&client=tw-ob", autoplay=True)
-            st.rerun()
+        reader = PdfReader(archivo)
+        st.session_state.pdf_text = "".join([p.extract_text() for p in reader.pages])[:8000]
+        
+        res = model.generate_content("Eres un Pediatra. Saluda a Jeferson Cuadrado de forma muy breve.")
+        st.session_state.entrenado = True
+        
+        # FORZADO DE AUDIO INICIAL
+        audio_url = f"https://translate.google.com/translate_tts?ie=UTF-8&q={res.text[:200]}&tl=es&client=tw-ob"
+        st.write("🔊 **Escucha al Doctor ahora...**")
+        st.audio(audio_url, format="audio/mp3", autoplay=True)
+        st.rerun()
 
-# 4. INTERACCIÓN POR VOZ (Audífonos)
+# 2. Interacción por Voz
 if st.session_state.entrenado:
-    st.markdown("### 👨‍⚕️ El Doctor te escucha...")
+    st.markdown("### 👨‍⚕️ El Doctor te está escuchando...")
     
-    # Botón de micrófono nativo (Speech to Text)
-    texto_voz = speech_to_text(
-        language='es',
-        start_prompt="🎤 TOCA PARA HABLAR",
-        stop_prompt="⏹️ ENVIAR AL DOCTOR",
-        key='speech'
-    )
+    # Botón de micrófono
+    texto_voz = speech_to_text(language='es', start_prompt="🎤 TOCAR PARA HABLAR", stop_prompt="⏹️ ENVIAR", key='speech')
 
     if texto_voz:
-        # El doctor responde basándose en el manual y tu voz
-        contexto = f"Eres Pediatra. Jeferson dice: '{texto_voz}'. Responde breve usando el manual: {st.session_state.pdf_text}"
-        respuesta = model.generate_content(contexto)
+        historial = f"Eres Pediatra. Jeferson dice: '{texto_voz}'. Responde breve con el manual: {st.session_state.pdf_text}"
+        respuesta = model.generate_content(historial)
         
-        # Audio de respuesta del médico
-        t_voz = respuesta.text.replace('*', '') # Limpiamos símbolos
-        st.audio(f"https://translate.google.com/translate_tts?ie=UTF-8&q={t_voz[:200]}&tl=es&client=tw-ob", autoplay=True)
+        # VOZ DEL DOCTOR
+        t_voz = respuesta.text.replace('*', '')
+        audio_url_res = f"https://translate.google.com/translate_tts?ie=UTF-8&q={t_voz[:200]}&tl=es&client=tw-ob"
         
-        # Solo mostramos un aviso para que sepas que respondió
-        st.info("Doctor respondió (Escucha tus audífonos)")
-
-    if st.sidebar.button("🗑️ Reiniciar Sesión"):
-        st.session_state.clear()
-        st.rerun()
+        st.write("🔊 **Reproduciendo respuesta...**")
+        st.audio(audio_url_res, format="audio/mp3", autoplay=True)
+        # Dejamos el texto visible por si los audífonos fallan
+        st.info(f"Doctor dice: {respuesta.text}")
